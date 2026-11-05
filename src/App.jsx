@@ -1,27 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { 
   BookOpen, CheckCircle, Circle, Flame, Timer, Trash2, 
-  Download, Upload, Calendar, Tag, AlertCircle, RotateCcw, Check 
+  Download, Upload, Calendar, AlertCircle, RotateCcw, Check, LogOut, Lock, Mail 
 } from 'lucide-react';
+import { supabase } from './supabaseClient';
 
 export default function StudyApp() {
-  const [categories, setCategories] = useState(() => {
-    const saved = localStorage.getItem('ib_study_categories');
-    return saved ? JSON.parse(saved) : [
-      { id: 'cat-1', name: 'End of Term Examinations' },
-      { id: 'cat-2', name: 'SA (Summative Assessments)' }
-    ];
-  });
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [authError, setAuthError] = useState(null);
 
-  const [subjects, setSubjects] = useState(() => {
-    const saved = localStorage.getItem('ib_study_subjects');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [categories, setCategories] = useState([
+    { id: 'cat-1', name: 'End of Term Examinations' },
+    { id: 'cat-2', name: 'SA (Summative Assessments)' }
+  ]);
 
-  const [streakData, setStreakData] = useState(() => {
-    const saved = localStorage.getItem('ib_study_streak');
-    return saved ? JSON.parse(saved) : { currentStreak: 0, lastActiveDate: null, history: {} };
-  });
+  const [subjects, setSubjects] = useState([]);
+  const [streakData, setStreakData] = useState({ currentStreak: 0, lastActiveDate: null, history: {} });
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedSubjectId, setSelectedSubjectId] = useState(null);
@@ -32,7 +31,7 @@ export default function StudyApp() {
   const [newSubCatId, setNewSubCatId] = useState('');
   const [newSubExamDate, setNewSubExamDate] = useState('');
   
-  // Syllabus Adder Form State (Section chosen first)
+  // Syllabus Adder Form State
   const [targetCatIdForImport, setTargetCatIdForImport] = useState('');
   const [targetSubIdForImport, setTargetSubIdForImport] = useState('');
   const [rawSyllabusText, setRawSyllabusText] = useState('');
@@ -44,18 +43,74 @@ export default function StudyApp() {
   const [isEditingTimer, setIsEditingTimer] = useState(false);
   const [customMinutesInput, setCustomMinutesInput] = useState('25');
 
+  // 1. Manage Auth Session
   useEffect(() => {
-    localStorage.setItem('ib_study_categories', JSON.stringify(categories));
-  }, [categories]);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
+    });
 
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // 2. Fetch User Data from Supabase when logged in
   useEffect(() => {
-    localStorage.setItem('ib_study_subjects', JSON.stringify(subjects));
-  }, [subjects]);
+    if (!session) {
+      setDataLoaded(false);
+      return;
+    }
 
+    async function fetchUserData() {
+      const { data, error } = await supabase
+        .from('user_study_data')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .single();
+
+      if (data) {
+        if (data.categories) setCategories(data.categories);
+        if (data.subjects) setSubjects(data.subjects);
+        if (data.streak_data) setStreakData(data.streak_data);
+      } else if (error && error.code === 'PGRST116') {
+        // Row doesn't exist yet, insert initial defaults
+        await supabase.from('user_study_data').insert([{
+          user_id: session.user.id,
+          categories,
+          subjects: [],
+          streak_data: { currentStreak: 0, lastActiveDate: null, history: {} }
+        }]);
+      }
+      setDataLoaded(true);
+    }
+
+    fetchUserData();
+  }, [session]);
+
+  // 3. Auto-save User Data to Supabase on change
   useEffect(() => {
-    localStorage.setItem('ib_study_streak', JSON.stringify(streakData));
-  }, [streakData]);
+    if (!session || !dataLoaded) return;
 
+    const saveData = async () => {
+      await supabase
+        .from('user_study_data')
+        .upsert({
+          user_id: session.user.id,
+          categories,
+          subjects,
+          streak_data: streakData,
+          updated_at: new Date()
+        });
+    };
+
+    const timeout = setTimeout(saveData, 800); // debounce saves
+    return () => clearTimeout(timeout);
+  }, [categories, subjects, streakData, session, dataLoaded]);
+
+  // Timer interval
   useEffect(() => {
     let interval = null;
     if (isTimerRunning && timerSeconds > 0) {
@@ -69,6 +124,23 @@ export default function StudyApp() {
     }
     return () => clearInterval(interval);
   }, [isTimerRunning, timerSeconds]);
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError(null);
+    if (isSignUp) {
+      const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+      if (error) setAuthError(error.message);
+      else alert('Check your email for confirmation or log in if auto-confirmed!');
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      if (error) setAuthError(error.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
 
   const recordActivity = () => {
     const today = new Date().toISOString().split('T')[0];
@@ -194,33 +266,80 @@ export default function StudyApp() {
     return `${days} days remaining`;
   };
 
-  const exportBackup = () => {
-    const data = { categories, subjects, streakData };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ib-study-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-  };
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center font-sans text-xs text-[#666666]">
+        Loading workspace...
+      </div>
+    );
+  }
 
-  const importBackup = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const parsed = JSON.parse(event.target.result);
-        if (parsed.categories) setCategories(parsed.categories);
-        if (parsed.subjects) setSubjects(parsed.subjects);
-        if (parsed.streakData) setStreakData(parsed.streakData);
-        alert('Backup restored successfully!');
-      } catch (err) {
-        alert('Invalid backup file format.');
-      }
-    };
-    reader.readAsText(file);
-  };
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFA] text-[#111111] flex items-center justify-center font-serif p-4 selection:bg-[#111111] selection:text-[#FAFAFA]">
+        <div className="bg-white border border-[#E5E5E5] p-8 rounded-xl max-w-md w-full space-y-6 shadow-sm font-sans">
+          <div className="text-center space-y-1">
+            <div className="bg-[#111111] text-white p-2.5 rounded-lg w-fit mx-auto mb-3">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <h1 className="text-lg font-bold tracking-tight">IB Study Command Center</h1>
+            <p className="text-xs text-[#666666]">Sign in to sync your study command center across devices</p>
+          </div>
+
+          {authError && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-xs p-3 rounded-lg">
+              {authError}
+            </div>
+          )}
+
+          <form onSubmit={handleAuth} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[#666666] mb-1">Email Address</label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-[#888888] absolute left-3 top-2.5" />
+                <input 
+                  type="email" 
+                  required
+                  placeholder="student@ib.edu"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="w-full border border-[#E5E5E5] rounded-lg pl-9 pr-3 py-2 text-xs focus:outline-none focus:border-[#111111]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#666666] mb-1">Password</label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#888888] absolute left-3 top-2.5" />
+                <input 
+                  type="password" 
+                  required
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full border border-[#E5E5E5] rounded-lg pl-9 pr-3 py-2 text-xs focus:outline-none focus:border-[#111111]"
+                />
+              </div>
+            </div>
+
+            <button type="submit" className="w-full bg-[#111111] hover:bg-[#333333] text-white py-2.5 rounded-lg text-xs font-medium transition">
+              {isSignUp ? 'Create Account' : 'Sign In'}
+            </button>
+          </form>
+
+          <div className="text-center pt-2 border-t border-[#E5E5E5]">
+            <button 
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-xs text-[#666666] hover:text-[#111111]"
+            >
+              {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
   const filteredSubjectsForImport = targetCatIdForImport 
@@ -237,7 +356,7 @@ export default function StudyApp() {
           </div>
           <div>
             <h1 className="text-lg font-bold tracking-tight font-sans">IB Study Command Center</h1>
-            <p className="text-xs text-[#666666] font-sans">Monochrome Academic Workspace</p>
+            <p className="text-xs text-[#666666] font-sans">Cloud Synchronized Workspace</p>
           </div>
         </div>
 
@@ -292,6 +411,14 @@ export default function StudyApp() {
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          <button 
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-xs border border-[#E5E5E5] hover:border-[#111111] px-3 py-1.5 rounded-lg transition text-[#666666] hover:text-[#111111]"
+            title="Sign Out"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Sign Out
+          </button>
         </div>
       </header>
 
@@ -308,12 +435,6 @@ export default function StudyApp() {
           className={`py-3.5 border-b-2 font-medium transition ${activeTab === 'import' ? 'border-[#111111] text-[#111111]' : 'border-transparent text-[#666666] hover:text-[#111111]'}`}
         >
           Syllabus Adder
-        </button>
-        <button 
-          onClick={() => setActiveTab('backup')}
-          className={`py-3.5 border-b-2 font-medium transition ${activeTab === 'backup' ? 'border-[#111111] text-[#111111]' : 'border-transparent text-[#666666] hover:text-[#111111]'}`}
-        >
-          Data Backup
         </button>
       </nav>
 
@@ -574,34 +695,6 @@ export default function StudyApp() {
                 Generate Checklists
               </button>
             </form>
-          </div>
-        )}
-
-        {activeTab === 'backup' && (
-          <div className="max-w-md mx-auto bg-white border border-[#E5E5E5] rounded-xl p-8 space-y-6 text-center shadow-sm">
-            <div className="border border-[#E5E5E5] text-[#111111] w-10 h-10 rounded-lg flex items-center justify-center mx-auto">
-              <Download className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold mb-1">Data Backup & Recovery</h2>
-              <p className="text-xs text-[#666666]">
-                Download your study progress as a JSON file or restore an existing backup.
-              </p>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-              <button 
-                onClick={exportBackup}
-                className="flex items-center justify-center gap-2 bg-[#111111] hover:bg-[#333333] text-white px-4 py-2.5 rounded-lg text-xs font-medium transition"
-              >
-                <Download className="w-3.5 h-3.5" /> Download (.json)
-              </button>
-              
-              <label className="flex items-center justify-center gap-2 border border-[#E5E5E5] hover:border-[#111111] px-4 py-2.5 rounded-lg text-xs font-medium transition cursor-pointer bg-white">
-                <Upload className="w-3.5 h-3.5" /> Restore Backup
-                <input type="file" accept=".json" onChange={importBackup} className="hidden" />
-              </label>
-            </div>
           </div>
         )}
       </main>
