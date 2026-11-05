@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { 
   BookOpen, CheckCircle, Circle, Flame, Timer, Trash2, 
-  Download, Upload, Calendar, AlertCircle, RotateCcw, Check, LogOut, Lock, Mail 
+  Download, Upload, Calendar, AlertCircle, RotateCcw, Check, LogOut, Lock, User 
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 export default function StudyApp() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [authEmail, setAuthEmail] = useState('');
+  const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [authError, setAuthError] = useState(null);
@@ -128,12 +128,16 @@ export default function StudyApp() {
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError(null);
+    
+    // Map username to a secure backend email format for Supabase Auth
+    const formattedEmail = `${authUsername.trim().toLowerCase()}@study.local`;
+
     if (isSignUp) {
-      const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+      const { error } = await supabase.auth.signUp({ email: formattedEmail, password: authPassword });
       if (error) setAuthError(error.message);
-      else alert('Check your email for confirmation or log in if auto-confirmed!');
+      else alert('Account created successfully! You can now sign in.');
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      const { error } = await supabase.auth.signInWithPassword({ email: formattedEmail, password: authPassword });
       if (error) setAuthError(error.message);
     }
   };
@@ -283,7 +287,7 @@ export default function StudyApp() {
               <BookOpen className="w-5 h-5" />
             </div>
             <h1 className="text-lg font-bold tracking-tight">IB Study Command Center</h1>
-            <p className="text-xs text-[#666666]">Sign in to sync your study command center across devices</p>
+            <p className="text-xs text-[#666666]">Sign in with your User ID to sync across devices</p>
           </div>
 
           {authError && (
@@ -294,15 +298,15 @@ export default function StudyApp() {
 
           <form onSubmit={handleAuth} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-[#666666] mb-1">Email Address</label>
+              <label className="block text-xs font-medium text-[#666666] mb-1">User ID</label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-[#888888] absolute left-3 top-2.5" />
+                <User className="w-4 h-4 text-[#888888] absolute left-3 top-2.5" />
                 <input 
-                  type="email" 
+                  type="text" 
                   required
-                  placeholder="student@ib.edu"
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="e.g. student123"
+                  value={authUsername}
+                  onChange={(e) => setAuthUsername(e.target.value)}
                   className="w-full border border-[#E5E5E5] rounded-lg pl-9 pr-3 py-2 text-xs focus:outline-none focus:border-[#111111]"
                 />
               </div>
