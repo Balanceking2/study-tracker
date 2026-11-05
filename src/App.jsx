@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  BookOpen, CheckCircle, Circle, Flame, Timer, Plus, Trash2, 
-  Download, Upload, Calendar, Tag, AlertCircle, Play, Pause, RotateCcw, Award 
+  BookOpen, CheckCircle, Circle, Flame, Timer, Trash2, 
+  Download, Upload, Calendar, Tag, AlertCircle, RotateCcw, Check 
 } from 'lucide-react';
 
 export default function StudyApp() {
@@ -26,16 +26,23 @@ export default function StudyApp() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedSubjectId, setSelectedSubjectId] = useState(null);
 
+  // Form states
   const [newCatName, setNewCatName] = useState('');
   const [newSubName, setNewSubName] = useState('');
   const [newSubCatId, setNewSubCatId] = useState('');
   const [newSubExamDate, setNewSubExamDate] = useState('');
-  const [rawSyllabusText, setRawSyllabusText] = useState('');
+  
+  // Syllabus Adder Form State (Section chosen first)
+  const [targetCatIdForImport, setTargetCatIdForImport] = useState('');
   const [targetSubIdForImport, setTargetSubIdForImport] = useState('');
+  const [rawSyllabusText, setRawSyllabusText] = useState('');
 
+  // Editable Timer State
+  const [timerMinutes, setTimerMinutes] = useState(25);
   const [timerSeconds, setTimerSeconds] = useState(25 * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const [timerMode, setTimerMode] = useState('work');
+  const [isEditingTimer, setIsEditingTimer] = useState(false);
+  const [customMinutesInput, setCustomMinutesInput] = useState('25');
 
   useEffect(() => {
     localStorage.setItem('ib_study_categories', JSON.stringify(categories));
@@ -57,34 +64,24 @@ export default function StudyApp() {
       }, 1000);
     } else if (timerSeconds === 0) {
       setIsTimerRunning(false);
-      alert(timerMode === 'work' ? 'Focus session complete! Take a break.' : 'Break over! Back to studying.');
-      if (timerMode === 'work') {
-        recordActivity();
-      }
+      alert('Focus session complete!');
+      recordActivity();
     }
     return () => clearInterval(interval);
-  }, [isTimerRunning, timerSeconds, timerMode]);
+  }, [isTimerRunning, timerSeconds]);
 
   const recordActivity = () => {
     const today = new Date().toISOString().split('T')[0];
     const lastActive = streakData.lastActiveDate;
-    
     if (lastActive === today) return;
 
     let newStreak = streakData.currentStreak;
     if (!lastActive) {
       newStreak = 1;
     } else {
-      const lastDate = new Date(lastActive);
-      const currentDate = new Date(today);
-      const diffTime = Math.abs(currentDate - lastDate);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      if (diffDays === 1) {
-        newStreak += 1;
-      } else if (diffDays > 1) {
-        newStreak = 1;
-      }
+      const diffDays = Math.ceil(Math.abs(new Date(today) - new Date(lastActive)) / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) newStreak += 1;
+      else if (diffDays > 1) newStreak = 1;
     }
 
     setStreakData({
@@ -97,8 +94,7 @@ export default function StudyApp() {
   const handleAddCategory = (e) => {
     e.preventDefault();
     if (!newCatName.trim()) return;
-    const newCat = { id: 'cat-' + Date.now(), name: newCatName.trim() };
-    setCategories([...categories, newCat]);
+    setCategories([...categories, { id: 'cat-' + Date.now(), name: newCatName.trim() }]);
     setNewCatName('');
   };
 
@@ -109,15 +105,14 @@ export default function StudyApp() {
 
   const handleAddSubject = (e) => {
     e.preventDefault();
-    if (!newSubName.trim()) return;
-    const newSubject = {
+    if (!newSubName.trim() || !newSubCatId) return;
+    setSubjects([...subjects, {
       id: 'sub-' + Date.now(),
       name: newSubName.trim(),
-      categoryId: newSubCatId || (categories[0] ? categories[0].id : ''),
+      categoryId: newSubCatId,
       examDate: newSubExamDate || '',
       topics: []
-    };
-    setSubjects([...subjects, newSubject]);
+    }]);
     setNewSubName('');
     setNewSubExamDate('');
   };
@@ -137,104 +132,66 @@ export default function StudyApp() {
     lines.forEach(line => {
       const trimmed = line.trim();
       if (!trimmed) return;
-
       const match = trimmed.match(/^([A-Z]\.?\d+(?:\.\d+)*)\s+(.*)$/i);
       
       if (match) {
         const code = match[1];
         const content = match[2];
-        const isAHL = /AHL/i.test(content);
-
-        const parts = code.split('.');
-        let parentCode = parts.slice(0, 2).join('.');
+        const parentCode = code.split('.').slice(0, 2).join('.');
 
         if (!topicsMap[parentCode]) {
-          topicsMap[parentCode] = {
-            id: 'top-' + Math.random().toString(36).substring(2, 9),
-            title: `Topic ${parentCode}`,
-            subtopics: []
-          };
+          topicsMap[parentCode] = { id: 'top-' + Math.random(), title: `Topic ${parentCode}`, subtopics: [] };
         }
-
         topicsMap[parentCode].subtopics.push({
-          id: 'subtop-' + Math.random().toString(36).substring(2, 9),
-          code: code,
+          id: 'subtop-' + Math.random(),
+          code,
           text: content,
-          ahl: isAHL,
-          completed: false
-        });
-      } else {
-        const defaultTopKey = 'General';
-        if (!topicsMap[defaultTopKey]) {
-          topicsMap[defaultTopKey] = {
-            id: 'top-gen',
-            title: 'General Topics',
-            subtopics: []
-          };
-        }
-        topicsMap[defaultTopKey].subtopics.push({
-          id: 'subtop-' + Math.random().toString(36).substring(2, 9),
-          code: '',
-          text: trimmed,
-          ahl: /AHL/i.test(trimmed),
+          ahl: /AHL/i.test(content),
           completed: false
         });
       }
     });
 
-    const generatedTopics = Object.values(topicsMap);
-
     setSubjects(subjects.map(sub => {
       if (sub.id === targetSubIdForImport) {
-        return {
-          ...sub,
-          topics: [...sub.topics, ...generatedTopics]
-        };
+        return { ...sub, topics: [...sub.topics, ...Object.values(topicsMap)] };
       }
       return sub;
     }));
 
     setRawSyllabusText('');
-    alert('Syllabus successfully parsed and imported!');
+    alert('Syllabus checklists generated successfully.');
   };
 
   const toggleSubtopic = (subId, topicId, subtopicId) => {
     recordActivity();
     setSubjects(subjects.map(sub => {
       if (sub.id !== subId) return sub;
-      const updatedTopics = sub.topics.map(top => {
-        if (top.id !== topicId) return top;
-        const updatedSubtopics = top.subtopics.map(st => {
-          if (st.id === subtopicId) {
-            return { ...st, completed: !st.completed };
-          }
-          return st;
-        });
-        return { ...top, subtopics: updatedSubtopics };
-      });
-      return { ...sub, topics: updatedTopics };
+      return {
+        ...sub,
+        topics: sub.topics.map(top => {
+          if (top.id !== topicId) return top;
+          return {
+            ...top,
+            subtopics: top.subtopics.map(st => st.id === subtopicId ? { ...st, completed: !st.completed } : st)
+          };
+        })
+      };
     }));
   };
 
   const calculateProgress = (subject) => {
-    let total = 0;
-    let completed = 0;
-    subject.topics.forEach(t => {
-      t.subtopics.forEach(st => {
-        total++;
-        if (st.completed) completed++;
-      });
-    });
+    let total = 0, completed = 0;
+    subject.topics.forEach(t => t.subtopics.forEach(st => { total++; if (st.completed) completed++; }));
     return total === 0 ? 0 : Math.round((completed / total) * 100);
   };
 
   const getCountdown = (dateString) => {
     if (!dateString) return null;
     const diff = new Date(dateString) - new Date();
-    if (diff <= 0) return 'Exam Date Reached!';
+    if (diff <= 0) return 'Exam Reached';
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
-    return `${days}d ${hours}h remaining`;
+    return `${days} days remaining`;
   };
 
   const exportBackup = () => {
@@ -266,41 +223,71 @@ export default function StudyApp() {
   };
 
   const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
+  const filteredSubjectsForImport = targetCatIdForImport 
+    ? subjects.filter(s => s.categoryId === targetCatIdForImport) 
+    : subjects;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+    <div className="min-h-screen bg-[#FAFAFA] text-[#111111] flex flex-col font-serif selection:bg-[#111111] selection:text-[#FAFAFA]">
+      {/* Header */}
+      <header className="border-b border-[#E5E5E5] px-8 py-5 flex flex-wrap items-center justify-between gap-4 bg-white">
         <div className="flex items-center space-x-3">
-          <div className="bg-indigo-600 p-2 rounded-xl text-white">
-            <BookOpen className="w-6 h-6" />
+          <div className="bg-[#111111] text-white p-2 rounded-lg">
+            <BookOpen className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">IB Study Command Center</h1>
-            <p className="text-xs text-slate-400">Syllabus Checklists, Countdowns & Streaks</p>
+            <h1 className="text-lg font-bold tracking-tight font-sans">IB Study Command Center</h1>
+            <p className="text-xs text-[#666666] font-sans">Monochrome Academic Workspace</p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-6">
-          <div className="flex items-center space-x-2 bg-orange-500/10 border border-orange-500/30 px-3 py-1.5 rounded-full">
-            <Flame className="w-5 h-5 text-orange-500 animate-pulse" />
-            <span className="text-sm font-semibold text-orange-400">{streakData.currentStreak} Day Streak!</span>
+        <div className="flex items-center space-x-6 font-sans">
+          <div className="flex items-center space-x-2 border border-[#E5E5E5] px-3.5 py-1.5 rounded-full bg-[#FAFAFA]">
+            <Flame className="w-4 h-4 text-[#111111]" />
+            <span className="text-xs font-semibold">{streakData.currentStreak} Day Streak</span>
           </div>
 
-          <div className="flex items-center space-x-3 bg-slate-800/80 px-4 py-1.5 rounded-xl border border-slate-700">
-            <Timer className="w-4 h-4 text-indigo-400" />
-            <span className="font-mono font-bold text-sm">
-              {Math.floor(timerSeconds / 60).toString().padStart(2, '0')}:
-              {(timerSeconds % 60).toString().padStart(2, '0')}
-            </span>
+          <div className="flex items-center space-x-3 border border-[#E5E5E5] px-3.5 py-1.5 rounded-lg bg-white">
+            <Timer className="w-4 h-4 text-[#666666]" />
+            {isEditingTimer ? (
+              <div className="flex items-center space-x-1">
+                <input 
+                  type="number" 
+                  value={customMinutesInput} 
+                  onChange={(e) => setCustomMinutesInput(e.target.value)}
+                  className="w-12 border border-[#111111] text-xs px-1 py-0.5 rounded text-center font-mono"
+                />
+                <button 
+                  onClick={() => {
+                    const mins = parseInt(customMinutesInput) || 25;
+                    setTimerMinutes(mins);
+                    setTimerSeconds(mins * 60);
+                    setIsEditingTimer(false);
+                  }}
+                  className="bg-[#111111] text-white p-1 rounded hover:bg-black"
+                >
+                  <Check className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <span 
+                onClick={() => setIsEditingTimer(true)} 
+                className="font-mono font-semibold text-xs cursor-pointer hover:underline"
+                title="Click to edit timer minutes"
+              >
+                {Math.floor(timerSeconds / 60).toString().padStart(2, '0')}:
+                {(timerSeconds % 60).toString().padStart(2, '0')}
+              </span>
+            )}
             <button 
               onClick={() => setIsTimerRunning(!isTimerRunning)} 
-              className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-lg font-medium transition"
+              className="text-xs bg-[#111111] text-white px-2.5 py-1 rounded font-medium hover:bg-[#333333] transition"
             >
               {isTimerRunning ? 'Pause' : 'Start'}
             </button>
             <button 
-              onClick={() => { setIsTimerRunning(false); setTimerSeconds(timerMode === 'work' ? 25*60 : 5*60); }} 
-              className="text-slate-400 hover:text-white"
+              onClick={() => { setIsTimerRunning(false); setTimerSeconds(timerMinutes * 60); }} 
+              className="text-[#666666] hover:text-[#111111]"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
@@ -308,65 +295,64 @@ export default function StudyApp() {
         </div>
       </header>
 
-      <nav className="bg-slate-900/50 border-b border-slate-800 px-6 flex space-x-6">
+      {/* Navigation */}
+      <nav className="border-b border-[#E5E5E5] px-8 flex space-x-8 bg-white font-sans text-sm">
         <button 
           onClick={() => { setActiveTab('dashboard'); setSelectedSubjectId(null); }}
-          className={`py-3 border-b-2 font-medium text-sm transition ${activeTab === 'dashboard' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+          className={`py-3.5 border-b-2 font-medium transition ${activeTab === 'dashboard' ? 'border-[#111111] text-[#111111]' : 'border-transparent text-[#666666] hover:text-[#111111]'}`}
         >
-          Dashboard & Exam Sections
+          Dashboard & Overview
         </button>
         <button 
           onClick={() => setActiveTab('import')}
-          className={`py-3 border-b-2 font-medium text-sm transition ${activeTab === 'import' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+          className={`py-3.5 border-b-2 font-medium transition ${activeTab === 'import' ? 'border-[#111111] text-[#111111]' : 'border-transparent text-[#666666] hover:text-[#111111]'}`}
         >
-          Syllabus Parser & Import
+          Syllabus Adder
         </button>
         <button 
           onClick={() => setActiveTab('backup')}
-          className={`py-3 border-b-2 font-medium text-sm transition ${activeTab === 'backup' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+          className={`py-3.5 border-b-2 font-medium transition ${activeTab === 'backup' ? 'border-[#111111] text-[#111111]' : 'border-transparent text-[#666666] hover:text-[#111111]'}`}
         >
-          Backup & Cloud Save (.json)
+          Data Backup
         </button>
       </nav>
 
-      <main className="flex-1 p-6 max-w-7xl w-full mx-auto">
+      {/* Main Content */}
+      <main className="flex-1 p-8 max-w-7xl w-full mx-auto font-sans">
         {activeTab === 'dashboard' && !selectedSubjectId && (
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-900/80 p-6 rounded-2xl border border-slate-800">
+          <div className="space-y-10">
+            {/* Control Panels */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white p-6 rounded-xl border border-[#E5E5E5]">
               <form onSubmit={handleAddCategory} className="space-y-3">
-                <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <Tag className="w-4 h-4 text-indigo-400" /> Add Exam Section / Category
-                </h3>
+                <h3 className="text-xs font-semibold text-[#666666] uppercase tracking-wider">1. Add Exam Section</h3>
                 <div className="flex gap-2">
                   <input 
                     type="text" 
-                    placeholder="e.g. End of Term Examination, SA..." 
+                    placeholder="e.g. End of Term, Summative..." 
                     value={newCatName}
                     onChange={(e) => setNewCatName(e.target.value)}
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-indigo-500"
+                    className="flex-1 border border-[#E5E5E5] rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-[#111111]"
                   />
-                  <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-sm font-semibold transition">
-                    Add Section
+                  <button type="submit" className="bg-[#111111] hover:bg-[#333333] text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+                    Add
                   </button>
                 </div>
               </form>
 
               <form onSubmit={handleAddSubject} className="space-y-3">
-                <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-indigo-400" /> Add Subject & Exam Date
-                </h3>
+                <h3 className="text-xs font-semibold text-[#666666] uppercase tracking-wider">2. Add Subject & Exam Date</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <input 
                     type="text" 
-                    placeholder="Subject Name (e.g. IB Biology HL)" 
+                    placeholder="Subject Name" 
                     value={newSubName}
                     onChange={(e) => setNewSubName(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+                    className="border border-[#E5E5E5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#111111]"
                   />
                   <select 
                     value={newSubCatId}
                     onChange={(e) => setNewSubCatId(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 text-slate-300"
+                    className="border border-[#E5E5E5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#111111] bg-white text-[#111111]"
                   >
                     <option value="">Select Section</option>
                     {categories.map(cat => (
@@ -377,34 +363,35 @@ export default function StudyApp() {
                     type="date" 
                     value={newSubExamDate}
                     onChange={(e) => setNewSubExamDate(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 text-slate-300"
+                    className="border border-[#E5E5E5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#111111] text-[#666666]"
                   />
                 </div>
-                <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 py-2 rounded-xl text-sm font-semibold transition">
+                <button type="submit" className="w-full bg-[#222222] hover:bg-[#111111] text-white py-2 rounded-lg text-sm font-medium transition">
                   Create Subject
                 </button>
               </form>
             </div>
 
+            {/* Categories & Subjects List */}
             {categories.map(cat => {
               const catSubjects = subjects.filter(s => s.categoryId === cat.id);
               return (
                 <div key={cat.id} className="space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <h2 className="text-lg font-bold text-indigo-400 flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+                  <div className="flex items-center justify-between border-b border-[#E5E5E5] pb-2">
+                    <h2 className="text-base font-bold text-[#111111] flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-[#111111]"></span>
                       {cat.name}
                     </h2>
                     <button 
                       onClick={() => handleDeleteCategory(cat.id)}
-                      className="text-slate-500 hover:text-rose-400 text-xs transition"
+                      className="text-[#666666] hover:text-[#111111] text-xs transition"
                     >
                       Delete Section
                     </button>
                   </div>
 
                   {catSubjects.length === 0 ? (
-                    <p className="text-sm text-slate-500 italic py-2">No subjects added under this section yet.</p>
+                    <p className="text-xs text-[#888888] italic py-2">No subjects added under this section yet.</p>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {catSubjects.map(sub => {
@@ -414,21 +401,21 @@ export default function StudyApp() {
                           <div 
                             key={sub.id} 
                             onClick={() => setSelectedSubjectId(sub.id)}
-                            className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-indigo-500/50 transition cursor-pointer flex flex-col justify-between group shadow-lg"
+                            className="bg-white border border-[#E5E5E5] rounded-xl p-5 hover:border-[#111111] transition cursor-pointer flex flex-col justify-between shadow-sm group"
                           >
                             <div>
                               <div className="flex justify-between items-start mb-3">
-                                <h3 className="font-bold text-lg group-hover:text-indigo-400 transition">{sub.name}</h3>
+                                <h3 className="font-bold text-base group-hover:underline">{sub.name}</h3>
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); handleDeleteSubject(sub.id); }}
-                                  className="text-slate-600 hover:text-rose-400 transition"
+                                  className="text-[#888888] hover:text-[#111111] transition"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
 
                               {sub.examDate && (
-                                <div className="flex items-center gap-1.5 text-xs text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded-lg w-fit mb-4">
+                                <div className="flex items-center gap-1.5 text-xs text-[#666666] bg-[#FAFAFA] border border-[#E5E5E5] px-2.5 py-1 rounded-md w-fit mb-4">
                                   <Calendar className="w-3.5 h-3.5" />
                                   <span>{countdown}</span>
                                 </div>
@@ -436,15 +423,12 @@ export default function StudyApp() {
                             </div>
 
                             <div className="space-y-2 mt-4">
-                              <div className="flex justify-between text-xs text-slate-400 font-medium">
+                              <div className="flex justify-between text-xs text-[#666666]">
                                 <span>Mastery Progress</span>
-                                <span className="text-slate-200">{progress}%</span>
+                                <span className="font-semibold text-[#111111]">{progress}%</span>
                               </div>
-                              <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-800">
-                                <div 
-                                  className="bg-gradient-to-r from-indigo-500 to-emerald-400 h-full transition-all duration-500" 
-                                  style={{ width: `${progress}%` }}
-                                ></div>
+                              <div className="w-full bg-[#E5E5E5] h-1.5 rounded-full overflow-hidden">
+                                <div className="bg-[#111111] h-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
                               </div>
                             </div>
                           </div>
@@ -460,66 +444,62 @@ export default function StudyApp() {
 
         {selectedSubject && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between bg-slate-900 p-6 rounded-2xl border border-slate-800">
+            <div className="flex items-center justify-between bg-white p-6 rounded-xl border border-[#E5E5E5]">
               <div>
                 <button 
                   onClick={() => setSelectedSubjectId(null)}
-                  className="text-xs text-indigo-400 hover:underline mb-2 inline-block"
+                  className="text-xs text-[#666666] hover:text-[#111111] mb-2 inline-block"
                 >
                   &larr; Back to Dashboard
                 </button>
-                <h2 className="text-2xl font-bold">{selectedSubject.name}</h2>
+                <h2 className="text-xl font-bold">{selectedSubject.name}</h2>
                 {selectedSubject.examDate && (
-                  <p className="text-sm text-amber-400 mt-1 flex items-center gap-1">
-                    <Calendar className="w-4 h-4" /> Exam Date: {selectedSubject.examDate} ({getCountdown(selectedSubject.examDate)})
+                  <p className="text-xs text-[#666666] mt-1 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5" /> Exam Date: {selectedSubject.examDate} ({getCountdown(selectedSubject.examDate)})
                   </p>
                 )}
               </div>
               <button 
                 onClick={() => setActiveTab('import')}
-                className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-sm font-semibold transition"
+                className="bg-[#111111] hover:bg-[#333333] text-white px-4 py-2 rounded-lg text-sm font-medium transition"
               >
-                + Bulk Add Syllabus Topics
+                + Add Syllabus Topics
               </button>
             </div>
 
             {selectedSubject.topics.length === 0 ? (
-              <div className="text-center py-16 bg-slate-900/40 rounded-2xl border border-dashed border-slate-800">
-                <AlertCircle className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-                <p className="text-slate-400 font-medium">No checklist topics found for this subject yet.</p>
+              <div className="text-center py-16 bg-white rounded-xl border border-dashed border-[#E5E5E5]">
+                <AlertCircle className="w-8 h-8 text-[#888888] mx-auto mb-3" />
+                <p className="text-xs text-[#666666]">No checklist topics found for this subject yet.</p>
                 <button 
                   onClick={() => setActiveTab('import')}
-                  className="mt-4 text-indigo-400 hover:underline text-sm font-semibold"
+                  className="mt-3 text-xs text-[#111111] font-semibold underline"
                 >
-                  Go to Syllabus Parser to paste your IB syllabus &rarr;
+                  Go to Syllabus Adder &rarr;
                 </button>
               </div>
             ) : (
               <div className="space-y-6">
                 {selectedSubject.topics.map(topic => (
-                  <div key={topic.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-                    <h3 className="font-bold text-lg text-indigo-300 border-b border-slate-800 pb-2">{topic.title}</h3>
-                    <div className="space-y-2.5">
+                  <div key={topic.id} className="bg-white border border-[#E5E5E5] rounded-xl p-6 space-y-4 shadow-sm">
+                    <h3 className="font-bold text-sm border-b border-[#E5E5E5] pb-2 text-[#111111]">{topic.title}</h3>
+                    <div className="space-y-2">
                       {topic.subtopics.map(st => (
                         <div 
                           key={st.id} 
                           onClick={() => toggleSubtopic(selectedSubject.id, topic.id, st.id)}
-                          className={`flex items-start gap-3 p-3 rounded-xl border transition cursor-pointer ${st.completed ? 'bg-emerald-950/20 border-emerald-900/50 text-slate-400 line-through' : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'}`}
+                          className={`flex items-start gap-3 p-3 rounded-lg border transition cursor-pointer ${st.completed ? 'bg-[#FAFAFA] border-[#E5E5E5] text-[#888888] line-through' : 'bg-white border-[#E5E5E5] hover:border-[#111111] text-[#111111]'}`}
                         >
                           <div className="mt-0.5">
-                            {st.completed ? (
-                              <CheckCircle className="w-5 h-5 text-emerald-500" />
-                            ) : (
-                              <Circle className="w-5 h-5 text-slate-600" />
-                            )}
+                            {st.completed ? <CheckCircle className="w-4 h-4 text-[#111111]" /> : <Circle className="w-4 h-4 text-[#CCCCCC]" />}
                           </div>
-                          <div className="flex-1 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex-1 flex flex-wrap items-center justify-between gap-2 text-xs">
                             <div>
-                              <span className="font-mono font-semibold text-indigo-400 mr-2">{st.code}</span>
+                              <span className="font-mono font-semibold text-[#111111] mr-2">{st.code}</span>
                               <span>{st.text.replace(/^[A-Z]\.?\d+(?:\.\d+)*\s*/, '')}</span>
                             </div>
                             {st.ahl && (
-                              <span className="bg-purple-500/10 text-purple-400 border border-purple-500/30 text-xs px-2 py-0.5 rounded-md font-mono">
+                              <span className="border border-[#111111] text-[#111111] text-[10px] px-1.5 py-0.5 rounded font-mono">
                                 AHL
                               </span>
                             )}
@@ -535,71 +515,90 @@ export default function StudyApp() {
         )}
 
         {activeTab === 'import' && (
-          <div className="max-w-3xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-8 space-y-6">
+          <div className="max-w-2xl mx-auto bg-white border border-[#E5E5E5] rounded-xl p-8 space-y-6 shadow-sm">
             <div>
-              <h2 className="text-xl font-bold mb-1">IB Syllabus Smart Parser</h2>
-              <p className="text-sm text-slate-400">
-                Paste your IB syllabus notes below. The system automatically detects topic codes (e.g. A1.1.1), groups them, and highlights AHL badges!
+              <h2 className="text-lg font-bold mb-1">Syllabus Adder</h2>
+              <p className="text-xs text-[#666666]">
+                First select your Exam Section, then choose the Target Subject, and paste your syllabus raw text.
               </p>
             </div>
 
             <form onSubmit={handleImportSyllabus} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Select Target Subject</label>
-                <select 
-                  value={targetSubIdForImport}
-                  onChange={(e) => setTargetSubIdForImport(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-300"
-                  required
-                >
-                  <option value="">-- Choose Subject --</option>
-                  {subjects.map(sub => (
-                    <option key={sub.id} value={sub.id}>{sub.name}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#666666] mb-1.5">1. Select Section First</label>
+                  <select 
+                    value={targetCatIdForImport}
+                    onChange={(e) => {
+                      setTargetCatIdForImport(e.target.value);
+                      setTargetSubIdForImport('');
+                    }}
+                    className="w-full border border-[#E5E5E5] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#111111] bg-white text-[#111111]"
+                  >
+                    <option value="">-- Choose Section --</option>
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#666666] mb-1.5">2. Select Subject</label>
+                  <select 
+                    value={targetSubIdForImport}
+                    onChange={(e) => setTargetSubIdForImport(e.target.value)}
+                    className="w-full border border-[#E5E5E5] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#111111] bg-white text-[#111111]"
+                    required
+                  >
+                    <option value="">-- Choose Subject --</option>
+                    {filteredSubjectsForImport.map(sub => (
+                      <option key={sub.id} value={sub.id}>{sub.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Paste Syllabus Raw Text</label>
+                <label className="block text-xs font-medium text-[#666666] mb-1.5">3. Paste Syllabus Raw Text</label>
                 <textarea 
-                  rows="10"
+                  rows="8"
                   placeholder="A1.1.1 Water as the medium for life&#10;A1.1.2 Hydrogen bonds as a consequence..."
                   value={rawSyllabusText}
                   onChange={(e) => setRawSyllabusText(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm font-mono focus:outline-none focus:border-indigo-500 text-slate-200"
+                  className="w-full border border-[#E5E5E5] rounded-lg p-3 text-xs font-mono focus:outline-none focus:border-[#111111]"
                   required
                 ></textarea>
               </div>
 
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 py-3 rounded-xl font-semibold transition">
-                Parse & Generate Checklists
+              <button type="submit" className="w-full bg-[#111111] hover:bg-[#333333] text-white py-2.5 rounded-lg text-xs font-medium transition">
+                Generate Checklists
               </button>
             </form>
           </div>
         )}
 
         {activeTab === 'backup' && (
-          <div className="max-w-xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-8 space-y-6 text-center">
-            <div className="bg-indigo-600/10 text-indigo-400 w-12 h-12 rounded-2xl flex items-center justify-center mx-auto">
-              <Award className="w-6 h-6" />
+          <div className="max-w-md mx-auto bg-white border border-[#E5E5E5] rounded-xl p-8 space-y-6 text-center shadow-sm">
+            <div className="border border-[#E5E5E5] text-[#111111] w-10 h-10 rounded-lg flex items-center justify-center mx-auto">
+              <Download className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold mb-1">Cloud Backup & Data Safety</h2>
-              <p className="text-sm text-slate-400">
-                Download your study progress, custom subjects, and streaks as a backup file. You can restore it anytime or transfer to another device.
+              <h2 className="text-lg font-bold mb-1">Data Backup & Recovery</h2>
+              <p className="text-xs text-[#666666]">
+                Download your study progress as a JSON file or restore an existing backup.
               </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+            <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
               <button 
                 onClick={exportBackup}
-                className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-semibold transition text-sm"
+                className="flex items-center justify-center gap-2 bg-[#111111] hover:bg-[#333333] text-white px-4 py-2.5 rounded-lg text-xs font-medium transition"
               >
-                <Download className="w-4 h-4" /> Download Backup (.json)
+                <Download className="w-3.5 h-3.5" /> Download (.json)
               </button>
               
-              <label className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 px-6 py-3 rounded-xl font-semibold transition text-sm cursor-pointer border border-slate-700">
-                <Upload className="w-4 h-4" /> Restore Backup
+              <label className="flex items-center justify-center gap-2 border border-[#E5E5E5] hover:border-[#111111] px-4 py-2.5 rounded-lg text-xs font-medium transition cursor-pointer bg-white">
+                <Upload className="w-3.5 h-3.5" /> Restore Backup
                 <input type="file" accept=".json" onChange={importBackup} className="hidden" />
               </label>
             </div>
